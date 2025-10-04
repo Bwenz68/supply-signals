@@ -1,10 +1,11 @@
 FROM python:3.11-slim
 
 WORKDIR /app
-COPY requirements.txt .
+COPY services/alert_engine/requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY ../../common /app/common
-COPY main.py /app/main.py
+COPY common /app/common
+COPY services/alert_engine/main.py /app/main.py
 
 CMD ["python", "-u", "main.py"]
+
