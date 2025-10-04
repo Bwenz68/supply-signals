@@ -1,0 +1,2 @@
+# Example newsroom RSS/Atom feeds (replace with the companies you track)
+https://investor.apple.com/news/news-details/rss/default.aspx
