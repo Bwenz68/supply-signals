@@ -1,0 +1,9 @@
+watchlists:
+  ai_infra:
+    description: "AI infrastructure & compute"
+    tickers: [NVDA, SMCI, MSFT, AMZN]
+    cik_ids: [1045810, 789019]
+  sandbox:
+    description: "Scratch pad for experiments"
+    tickers: []
+    cik_ids: []

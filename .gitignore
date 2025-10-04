@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+.env.*
+
+# Docker/Volumes/Snapshots
+.scratch/
+.snapshots/
+data/
+*.sqlite
+*.db
+tmp/
+redis_data/
+changedetection_data/
+
+# VSCode/IDE
+.vscode/
+.idea/
+
+# Logs
+logs/
+*.log
+
+# Mac/OS
+.DS_Store

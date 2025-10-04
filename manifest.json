@@ -1,0 +1,8 @@
+{
+  "project": "SUPPLY-SIGNALS",
+  "phase": "0",
+  "schemas": ["rawevent/1", "fact/1", "signal/1"],
+  "services": ["data_ingest", "normalize_enrich", "signal_detect", "alert_engine"],
+  "streams": ["events.raw", "facts.normalized", "signals.detected"],
+  "last_update_utc": "2025-10-04T00:00:00Z"
+}

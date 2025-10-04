@@ -1,0 +1,6 @@
+alert_rules:
+  email: false
+  cli: true
+  webhook: false
+  cooldown_minutes: 30
+  include_llm_memos: false

@@ -1,0 +1,13 @@
+weights:
+  A_direct: 0.30
+  B_ecosystem: 0.35
+  C_behavioral: 0.20
+  D_cross_sector: 0.15
+
+thresholds:
+  tier1: 0.85
+  tier2: 0.65
+
+llm_multipliers:
+  alpha_legend: 0.15
+  beta_hypothesis: 0.10

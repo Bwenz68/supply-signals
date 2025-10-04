@@ -1,0 +1,12 @@
+themes:
+  ai_infrastructure:
+    keywords: ["AI data center", "GPU", "H100", "inference cluster", "cloud capacity"]
+    regions: ["US", "EU"]
+    watch_radius_km: 50
+    track_new_companies: true
+
+  advanced_energy:
+    keywords: ["solar farm", "energy storage", "interconnect", "permit", "substation"]
+    regions: ["CA", "TX", "AZ", "NV"]
+    watch_radius_km: 100
+    track_new_companies: true
