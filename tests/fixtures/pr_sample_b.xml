@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Fabrikam Power Press Releases</title>
+    <link>https://example.com/fabrikam</link>
+    <description>Recent PR</description>
+    <item>
+      <title>Fabrikam secures long-lead transformer components</title>
+      <link>https://example.com/fabrikam-transformers</link>
+      <pubDate>Sun, 05 Oct 2025 14:05:00 GMT</pubDate>
+      <description>Securing long-lead items to reduce outage risks.</description>
+      <guid>fabrikam-pr-001</guid>
+    </item>
+  </channel>
+</rss>

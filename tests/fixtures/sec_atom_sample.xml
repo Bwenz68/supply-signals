@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>SEC Company Filings for Contoso Energy</title>
+  <updated>2025-10-05T13:30:00Z</updated>
+
+  <entry>
+    <title>8-K - Contoso Energy (00009876543)</title>
+    <link href="https://www.sec.gov/Archives/edgar/data/9876543/000987654325000001/0009876543-25-000001-index.htm" rel="alternate" type="text/html"/>
+    <updated>2025-10-05T12:34:56Z</updated>
+    <category term="8-K"/>
+    <id>urn:sec:contoso:8-k:0009876543-25-000001</id>
+    <summary type="html">Current report regarding transformer capacity expansion agreements.</summary>
+  </entry>
+
+  <entry>
+    <title>10-Q - Contoso Energy (00009876543)</title>
+    <link href="https://www.sec.gov/Archives/edgar/data/9876543/000987654325000045/0009876543-25-000045-index.htm" rel="alternate" type="text/html"/>
+    <updated>2025-09-30T10:00:00Z</updated>
+    <category term="10-Q"/>
+    <id>urn:sec:contoso:10-q:0009876543-25-000045</id>
+    <summary type="html">Quarterly report.</summary>
+  </entry>
+</feed>

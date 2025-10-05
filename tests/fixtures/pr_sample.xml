@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Contoso Energy Press Releases</title>
+    <link>https://example.com/contoso</link>
+    <description>Recent PR</description>
+    <item>
+      <title>Contoso expands transformer capacity at KY plant</title>
+      <link>https://example.com/contoso-transformer</link>
+      <pubDate>Sun, 05 Oct 2025 13:11:00 GMT</pubDate>
+      <description>Expansion increases regional supply resilience.</description>
+      <guid>contoso-pr-001</guid>
+    </item>
+    <item>
+      <title>Contoso signs long-term supply agreement</title>
+      <link>https://example.com/contoso-supply-agreement</link>
+      <pubDate>Sun, 05 Oct 2025 10:30:00 GMT</pubDate>
+      <description>Multi-year partnership to secure critical components.</description>
+      <guid>contoso-pr-002</guid>
+    </item>
+  </channel>
+</rss>

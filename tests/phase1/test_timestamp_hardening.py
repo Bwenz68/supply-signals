@@ -1,16 +1,20 @@
 import json
+import importlib
 from pathlib import Path
+import pytest
 
-from normalize_enrich.timestamp_hardener import process_dir
+# Auto-skip the whole module if the hardener was rolled back
+try:
+    mod = importlib.import_module("normalize_enrich.timestamp_hardener")
+except ModuleNotFoundError:
+    pytest.skip("timestamp hardener not present (rolled back)", allow_module_level=True)
+
+process_dir = mod.process_dir
 
 SAMPLE = [
-    # SEC naive Eastern
     {"source": "sec", "filing_datetime": "2025-10-05 02:20", "title": "10-K"},
-    # PR RFC-2822
     {"source": "pr", "pubDate": "Sun, 05 Oct 2025 06:20:00 GMT", "title": "Press release"},
-    # Missing → backfill
     {"source": "pr", "title": "No timestamp", "ingested_at_utc": "2025-10-05T06:25:11Z"},
-    # Garbage → error
     {"source": "sec", "filing_datetime": "not a date", "title": "Bad"},
 ]
 

@@ -1,0 +1,104 @@
+from __future__ import annotations
+import argparse, json, os, tempfile, re
+from glob import glob
+from typing import Dict, Any
+from shared.datetime_utils import parse_to_utc, to_iso_utc
+
+STRICT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+# Small, robust candidate set that matches your normalized records
+CANDIDATE_KEYS_SEC = ("event_datetime_utc", "event_datetime", "filing_datetime", "acceptance_datetime", "published_at")
+CANDIDATE_KEYS_PR  = ("event_datetime_utc", "event_datetime", "pubDate", "published", "updated", "lastBuildDate", "published_at")
+
+def infer_source(rec: Dict[str, Any]) -> str:
+    s = (rec.get("source") or "").strip().lower()
+    if s: return s
+    ek = (rec.get("event_kind") or "").strip().lower()
+    if ek == "sec": return "sec"
+    if ek in ("pr", "press_release", "press-release"): return "pr"
+    return ""
+
+def default_tz(src: str) -> str:
+    if src == "sec": return os.environ.get("SEC_DEFAULT_TZ", "America/New_York")
+    if src == "pr":  return os.environ.get("PR_DEFAULT_TZ", "UTC")
+    return os.environ.get("HARDEN_TZ_FALLBACK", "UTC")
+
+def try_coerce(val: Any, naive_tz: str) -> str | None:
+    try:
+        return to_iso_utc(parse_to_utc(str(val), naive_tz=naive_tz))
+    except Exception:
+        return None
+
+def harden_record(rec: Dict[str, Any], totals: Dict[str, int]) -> Dict[str, Any]:
+    # Already strict → leave as-is
+    v = rec.get("event_datetime_utc")
+    if isinstance(v, str) and STRICT.fullmatch(v):
+        return rec
+
+    out = dict(rec)
+    src = infer_source(rec)
+    naive = default_tz(src)
+    keys = CANDIDATE_KEYS_SEC if src == "sec" else (CANDIDATE_KEYS_PR if src == "pr" else CANDIDATE_KEYS_PR + CANDIDATE_KEYS_SEC)
+
+    # Try candidates, including existing non-strict event_datetime_utc
+    for k in keys:
+        if k in rec and rec.get(k):
+            iso = try_coerce(rec[k], naive)
+            if iso:
+                out["event_datetime_utc"] = iso
+                out["timestamp_source"] = k
+                out["timestamp_backfilled"] = False
+                out.pop("timestamp_error", None)
+                totals["ok"] += 1
+                return out
+
+    # Backfill from ingested_at_utc when present
+    if rec.get("ingested_at_utc"):
+        iso = try_coerce(rec["ingested_at_utc"], "UTC")
+        if iso:
+            out["event_datetime_utc"] = iso
+            out["timestamp_source"] = "ingested_at_utc"
+            out["timestamp_backfilled"] = True
+            out.pop("timestamp_error", None)
+            totals["backfilled"] += 1
+            return out
+
+    # Mark missing/unparseable
+    if "timestamp_error" not in out:
+        out["timestamp_error"] = "missing"
+    totals["missing_or_error"] += 1
+    return out
+
+def process_dir(queue_dir: str) -> Dict[str, int]:
+    totals = {"files": 0, "records": 0, "ok": 0, "backfilled": 0, "parse_fail": 0, "missing_or_error": 0}
+    if os.environ.get("TIMESTAMP_HARDEN_DISABLE") == "1":
+        print("timestamp hardening disabled via TIMESTAMP_HARDEN_DISABLE=1"); return totals
+
+    paths = sorted(glob(os.path.join(queue_dir, "*.norm.jsonl")))
+    for p in paths:
+        totals["files"] += 1
+        fd, tmp = tempfile.mkstemp(prefix=".tmp_", dir=os.path.dirname(p))
+        w = os.fdopen(fd, "w", encoding="utf-8")
+        with open(p, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip(): w.write(line); continue
+                try:
+                    rec = json.loads(line); totals["records"] += 1
+                except Exception:
+                    totals["parse_fail"] += 1; w.write(line); continue
+                out = harden_record(rec, totals)
+                w.write(json.dumps(out, ensure_ascii=False) + "\n")
+        w.close(); os.replace(tmp, p)
+    return totals
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description="Harden timestamps in normalized queue to strict ISO-8601 Z.")
+    ap.add_argument("--dir", default="queue/normalized_events")
+    ap.add_argument("--check", action="store_true", help="(ignored; in-place always)")
+    args = ap.parse_args(argv)
+    t = process_dir(args.dir)
+    print(f"hardened: files={t['files']} records={t['records']} ok={t['ok']} backfilled={t['backfilled']} parse_fail={t['parse_fail']} missing_or_error={t['missing_or_error']}")
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>SEC Company Filings Page 2</title>
+  <updated>2025-10-05T14:00:00Z</updated>
+  <link rel="self" href="sec_atom_page2.xml"/>
+
+  <entry>
+    <title>10-Q - Contoso Energy (00009876543)</title>
+    <link href="https://www.sec.gov/Archives/edgar/data/9876543/000987654325000102/0009876543-25-000102-index.htm" rel="alternate" type="text/html"/>
+    <updated>2025-09-30T10:00:00Z</updated>
+    <category term="10-Q"/>
+    <id>urn:sec:contoso:10-q:0009876543-25-000102</id>
+    <summary type="html">Quarterly report.</summary>
+  </entry>
+</feed>

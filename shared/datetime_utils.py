@@ -10,35 +10,41 @@ __all__ = ["parse_to_utc", "to_iso_utc", "STRICT_Z_ISO_PATTERN"]
 # Strict pattern for final outputs: YYYY-MM-DDTHH:MM:SSZ
 STRICT_Z_ISO_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
-# Relaxed detector to see if a string already carries tz info
-_TZ_TOKEN = re.compile(r"(Z|[+-]\d{2}:\d{2}|[+-]\d{4}|GMT|UTC)\s*$", re.IGNORECASE)
-
 # Sanity window (inclusive lower bound, exclusive upper bound)
 _MIN_DT = datetime(2000, 1, 1, tzinfo=timezone.utc)
 _MAX_DT = datetime(2100, 1, 1, tzinfo=timezone.utc)
 
 
 def _normalize_candidate(s: str) -> str:
-    """Normalize common date-time quirks without changing semantics."""
+    """
+    Normalize common date-time quirks without changing semantics.
+    Handles:
+      - 'YYYY/MM/DD' -> 'YYYY-MM-DD'
+      - space between date and time -> 'T'
+      - adds ':00' seconds if missing (even if followed by Z/offset)
+      - '+HHMM' -> '+HH:MM' (removes stray space before offset too)
+      - uppercase trailing 'z' and convert 'Z' to '+00:00' for fromisoformat
+    """
     s = s.strip()
 
-    # Replace common date/time delimiter " " with "T" when ISO-like
-    if re.match(r"^\d{4}[-/]\d{2}[-/]\d{2}\s+\d{2}:\d{2}(:\d{2})?$", s):
-        s = re.sub(r"\s+", "T", s, count=1)
-
-    # Normalize slashes to dashes in date portion
-    if re.match(r"^\d{4}/\d{2}/\d{2}T", s):
-        s = s.replace("/", "-", 2)
-
-    # If lowercase 'z', normalize to uppercase 'Z'
+    # Normalize lowercase 'z' to 'Z'
     if s.endswith("z"):
         s = s[:-1] + "Z"
 
-    # If ISO-like with missing seconds, add :00
-    if re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$", s):
-        s = s + ":00"
+    # Convert leading slash date to dashes
+    s = re.sub(r"^(\d{4})/(\d{2})/(\d{2})", r"\1-\2-\3", s)
 
-    # If explicit 'Z', fromisoformat can't accept 'Z' → use +00:00
+    # Replace the first space between date and time with 'T' (HH:MM or HH:MM:SS)
+    s = re.sub(r"^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}(?::\d{2})?)", r"\1T\2", s, count=1)
+
+    # If ISO-like with missing seconds, add ':00' even if a TZ/space follows
+    # e.g. '...T12:34Z', '...T12:34+0000', '...T12:34 +0000'
+    s = re.sub(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?=(Z|[+-]\d{2}:?\d{2}|\s|$))", r"\1:00", s, count=1)
+
+    # Canonicalize '+HHMM' or ' +HHMM' to '+HH:MM' and drop the space
+    s = re.sub(r"\s*([+-]\d{2})(\d{2})$", r"\1:\2", s)
+
+    # If explicit 'Z', datetime.fromisoformat doesn't accept 'Z' -> use '+00:00'
     if s.endswith("Z"):
         s = s[:-1] + "+00:00"
 
@@ -67,9 +73,9 @@ def parse_to_utc(dt_str: str, *, naive_tz: str | None = None) -> datetime:
     try:
         dt = datetime.fromisoformat(s)
     except Exception:
-        # Try RFC-2822/RSS
+        # Try RFC-2822/RSS (e.g., "Sun, 05 Oct 2025 06:20:00 GMT")
         try:
-            dt = parsedate_to_datetime(raw)  # use raw here to respect GMT, etc.
+            dt = parsedate_to_datetime(raw)  # use raw here to respect 'GMT', etc.
         except Exception:
             raise ValueError("unparseable")
 
@@ -78,7 +84,6 @@ def parse_to_utc(dt_str: str, *, naive_tz: str | None = None) -> datetime:
             try:
                 dt = dt.replace(tzinfo=ZoneInfo(naive_tz))
             except Exception:
-                # If tz database missing or invalid tz name, fall back to UTC
                 dt = dt.replace(tzinfo=timezone.utc)
         else:
             dt = dt.replace(tzinfo=timezone.utc)
