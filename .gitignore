@@ -9,3 +9,12 @@ queue/
 # Local offline PR/SEC mocks (keep these out of the repo)
 ref/pr_mock.xml
 ref/newsroom_rss_list_offline.txt
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+.state/
+queue/
+ref/watchlist.txt
+*.pre-*
