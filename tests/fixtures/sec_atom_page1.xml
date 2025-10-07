@@ -1,17 +1,17 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom">
-  <title>SEC Company Filings Page 1</title>
-  <updated>2025-10-05T15:00:00Z</updated>
-  <link rel="self" href="sec_atom_page1.xml"/>
-  <!-- Absolute next link to avoid file:// path resolution quirks -->
-  <link rel="next" href="file:///home/bill/projects/supply-signals/tests/fixtures/sec_atom_page2.xml"/>
+<?xml version='1.0' encoding='utf-8'?>
+<ns0:feed xmlns:ns0="http://www.w3.org/2005/Atom">
+  <ns0:title>SEC Company Filings Page 1</ns0:title>
+  <ns0:updated>2025-10-05T15:00:00Z</ns0:updated>
+  <ns0:link rel="self" href="sec_atom_page1.xml" />
+  
+  <ns0:link rel="next" href="file:///home/bill/projects/supply-signals/tests/fixtures/sec_atom_page2.xml" />
 
-  <entry>
-    <title>8-K - Contoso Energy (00009876543)</title>
-    <link href="https://www.sec.gov/Archives/edgar/data/9876543/000987654325000101/0009876543-25-000101-index.htm" rel="alternate" type="text/html"/>
-    <updated>2025-10-05T14:10:00Z</updated>
-    <category term="8-K"/>
-    <id>urn:sec:contoso:8-k:0009876543-25-000101</id>
-    <summary type="html">Current report re: capacity expansion.</summary>
-  </entry>
-</feed>
+  <ns0:entry>
+    <ns0:title>8-K - Contoso Energy (00009876543)</ns0:title>
+    <ns0:link href="https://www.sec.gov/Archives/edgar/data/9876543/000987654325000101/0009876543-25-000101-index.htm" rel="alternate" type="text/html" />
+    <ns0:updated>2025-10-05T14:10:00Z</ns0:updated>
+    <ns0:category term="8-K" />
+    <ns0:id>urn:sec:contoso:8-k:0009876543-25-000101</ns0:id>
+    <ns0:summary type="html">Current report re: capacity expansion.</ns0:summary>
+  </ns0:entry>
+</ns0:feed>

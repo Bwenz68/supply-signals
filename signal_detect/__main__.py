@@ -79,7 +79,9 @@ def main():
                         skipped_dupes += 1
                         continue
 
-                    sig = {"score": s, "hits": hits, "event": d}
+                    sig = dict(d)  # Start with all event fields
+                    sig["score"] = s
+                    sig["rule_hits"] = hits
                     f_out.write(json.dumps(sig, ensure_ascii=False) + "\n")
                     emitted += 1
 

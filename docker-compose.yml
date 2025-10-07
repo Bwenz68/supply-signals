@@ -1,47 +1,194 @@
+# docker-compose.yml - SUPPLY-SIGNALS File-Queue Pipeline (Phase 1)
+
 services:
-  redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "6379:6379"
+  # --------------------------------------------------------------------------
+  # Ingest: Press Release (single feed)
+  # --------------------------------------------------------------------------
+  ingest_pr_single:
+    image: python:3.10-slim
+    working_dir: /app
+    user: "${UID:-1000}:${GID:-1000}"
     volumes:
-      - redis_data:/data
+      - ./:/app:rw
+    environment:
+      - HOME=/tmp
+      - PR_USER_AGENT=${PR_USER_AGENT:-supply-signals/1.0}
+      - PR_CACHE_FILE=${PR_CACHE_FILE:-.state/pr_cache.json}
+      - RAW_QUEUE_DIR=${RAW_QUEUE_DIR:-queue/raw_events}
+      - PR_FEED_URL=${PR_FEED_URL:-file:///app/tests/fixtures/pr_sample.xml}
+      - PR_ISSUER_NAME=${PR_ISSUER_NAME:-Contoso Energy}
+    command: bash -c "pip install -q feedparser && python -m data_ingest.pr_feed_cli --url \"$$PR_FEED_URL\" --issuer-name \"$$PR_ISSUER_NAME\""
+    profiles:
+      - ingest
+      - pr
 
-  data_ingest:
-    build:
-      context: .
-      dockerfile: services/data_ingest/Dockerfile
-    env_file: .env
-    depends_on:
-      - redis
+  # --------------------------------------------------------------------------
+  # Ingest: Press Release (multi-feed)
+  # --------------------------------------------------------------------------
+  ingest_pr_multi:
+    image: python:3.10-slim
+    working_dir: /app
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./:/app:rw
+    environment:
+      - HOME=/tmp
+      - PR_USER_AGENT=${PR_USER_AGENT:-supply-signals/1.0}
+      - PR_CACHE_FILE=${PR_CACHE_FILE:-.state/pr_cache.json}
+      - RAW_QUEUE_DIR=${RAW_QUEUE_DIR:-queue/raw_events}
+      - PR_FEEDS_FILE=${PR_FEEDS_FILE:-ref/feeds.txt}
+      - PR_MAX_PER_FEED=${PR_MAX_PER_FEED:-50}
+    command: bash -c "pip install -q feedparser && python -m data_ingest.pr_feeds_cli --feeds-file \"$$PR_FEEDS_FILE\" --max $$PR_MAX_PER_FEED"
+    profiles:
+      - ingest
+      - pr
 
+  # --------------------------------------------------------------------------
+  # Ingest: SEC EDGAR (single CIK)
+  # --------------------------------------------------------------------------
+  ingest_sec:
+    image: python:3.10-slim
+    working_dir: /app
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./:/app:rw
+    environment:
+      - HOME=/tmp
+      - SEC_USER_AGENT=${SEC_USER_AGENT:-}
+      - SEC_RATE_PER_MIN=${SEC_RATE_PER_MIN:-6}
+      - EDGAR_CACHE_FILE=${EDGAR_CACHE_FILE:-.state/edgar_cache.json}
+      - RAW_QUEUE_DIR=${RAW_QUEUE_DIR:-queue/raw_events}
+      - SEC_CIK=${SEC_CIK:-9876543}
+      - SEC_FORMS=${SEC_FORMS:-8-K,10-Q}
+      - SEC_MAX=${SEC_MAX:-50}
+      - SEC_PAGES_MAX=${SEC_PAGES_MAX:-3}
+      - SEC_ISSUER_NAME=${SEC_ISSUER_NAME:-Contoso Energy}
+      - SEC_URL=${SEC_URL:-}
+    command: bash -c "pip install -q feedparser python-dateutil && python -m data_ingest.sec_edgar_cli --cik \"$$SEC_CIK\" --forms \"$$SEC_FORMS\" --max $$SEC_MAX --pages-max $$SEC_PAGES_MAX --issuer-name \"$$SEC_ISSUER_NAME\" $${SEC_URL:+--url \"$$SEC_URL\"}"
+    profiles:
+      - ingest
+      - sec
+
+  # --------------------------------------------------------------------------
+  # Normalize & Enrich
+  # --------------------------------------------------------------------------
   normalize_enrich:
-    build:
-      context: .
-      dockerfile: services/normalize_enrich/Dockerfile
-    env_file: .env
-    depends_on:
-      - redis
-      - data_ingest
+    image: python:3.10-slim
+    working_dir: /app
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./:/app:rw
+    environment:
+      - HOME=/tmp
+      - RAW_QUEUE_DIR=${RAW_QUEUE_DIR:-queue/raw_events}
+      - NORM_QUEUE_DIR=${NORM_QUEUE_DIR:-queue/normalized_events}
+    command: bash -c "pip install -q python-dateutil && python -m normalize_enrich --once"
+    profiles:
+      - pipeline
 
+  # --------------------------------------------------------------------------
+  # Signal Detection
+  # --------------------------------------------------------------------------
   signal_detect:
-    build:
-      context: .
-      dockerfile: services/signal_detect/Dockerfile
-    env_file: .env
-    depends_on:
-      - redis
-      - normalize_enrich
+    image: python:3.10-slim
+    working_dir: /app
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./:/app:rw
+    environment:
+      - HOME=/tmp
+      - NORM_QUEUE_DIR=${NORM_QUEUE_DIR:-queue/normalized_events}
+      - SIG_QUEUE_DIR=${SIG_QUEUE_DIR:-queue/signals}
+      - WATCHLIST_FILE=${WATCHLIST_FILE:-}
+      - WATCHLIST_DISABLE=${WATCHLIST_DISABLE:-0}
+      - DEDUPE_TTL_DAYS=${DEDUPE_TTL_DAYS:-7}
+      - DEDUPE_DISABLE=${DEDUPE_DISABLE:-0}
+      - SIGNAL_THRESHOLD=${SIGNAL_THRESHOLD:-3}
+    command: bash -c "python -m signal_detect --threshold $$SIGNAL_THRESHOLD $${WATCHLIST_FILE:+--watchlist \"$$WATCHLIST_FILE\"}"
+    profiles:
+      - pipeline
 
-  alert_engine:
-    build:
-      context: .
-      dockerfile: services/alert_engine/Dockerfile
-    env_file: .env
-    depends_on:
-      - redis
-      - signal_detect
-    tty: true
+  # --------------------------------------------------------------------------
+  # Alert Engine: Console
+  # --------------------------------------------------------------------------
+  alert_console:
+    image: python:3.10-slim
+    working_dir: /app
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./:/app:rw
+    environment:
+      - HOME=/tmp
+      - SIG_QUEUE_DIR=${SIG_QUEUE_DIR:-queue/signals}
+    command: bash -c "python -m alert_engine --signals-dir \"$$SIG_QUEUE_DIR\""
+    profiles:
+      - pipeline
+      - alert
 
-volumes:
-  redis_data:
+  # --------------------------------------------------------------------------
+  # Alert Engine: CSV
+  # --------------------------------------------------------------------------
+  alert_csv:
+    image: python:3.10-slim
+    working_dir: /app
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./:/app:rw
+    environment:
+      - HOME=/tmp
+      - SIG_QUEUE_DIR=${SIG_QUEUE_DIR:-queue/signals}
+      - ALERTS_CSV_PATH=${ALERTS_CSV_PATH:-queue/alerts/alerts.csv}
+    command: bash -c "python -m alert_engine --signals-dir \"$$SIG_QUEUE_DIR\" --csv --alerts-csv \"$$ALERTS_CSV_PATH\""
+    profiles:
+      - pipeline
+      - alert
+
+  # --------------------------------------------------------------------------
+  # Alert Engine: Slack
+  # --------------------------------------------------------------------------
+  alert_slack:
+    image: python:3.10-slim
+    working_dir: /app
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./:/app:rw
+    environment:
+      - HOME=/tmp
+      - SIG_QUEUE_DIR=${SIG_QUEUE_DIR:-queue/signals}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+      - SLACK_TIMEOUT_SECS=${SLACK_TIMEOUT_SECS:-5}
+      - SLACK_RATE_PER_SEC=${SLACK_RATE_PER_SEC:-1}
+      - SLACK_MENTION=${SLACK_MENTION:-}
+      - ALERT_SINKS_LIVE=${ALERT_SINKS_LIVE:-0}
+    command: bash -c "python -m alert_engine --signals-dir \"$$SIG_QUEUE_DIR\" --slack $${ALERT_SINKS_LIVE:+--sinks-live}"
+    profiles:
+      - alert
+      - slack
+
+  # --------------------------------------------------------------------------
+  # Alert Engine: SMTP
+  # --------------------------------------------------------------------------
+  alert_smtp:
+    image: python:3.10-slim
+    working_dir: /app
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./:/app:rw
+    environment:
+      - HOME=/tmp
+      - SIG_QUEUE_DIR=${SIG_QUEUE_DIR:-queue/signals}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - SMTP_TO=${SMTP_TO:-}
+      - SMTP_SUBJECT_PREFIX=${SMTP_SUBJECT_PREFIX:-[SUPPLY-SIGNALS]}
+      - SMTP_TIMEOUT_SECS=${SMTP_TIMEOUT_SECS:-10}
+      - SMTP_USE_SSL=${SMTP_USE_SSL:-0}
+      - SMTP_USE_STARTTLS=${SMTP_USE_STARTTLS:-1}
+      - ALERT_SINKS_LIVE=${ALERT_SINKS_LIVE:-0}
+    command: bash -c "python -m alert_engine --signals-dir \"$$SIG_QUEUE_DIR\" --smtp $${ALERT_SINKS_LIVE:+--sinks-live}"
+    profiles:
+      - alert
+      - smtp

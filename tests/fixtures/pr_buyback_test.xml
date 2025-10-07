@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Contoso Energy Press Releases</title>
+    <link>https://example.com/contoso</link>
+    <item>
+      <title>Contoso announces $500M share repurchase program</title>
+      <link>https://example.com/contoso-buyback</link>
+      <pubDate>Mon, 06 Oct 2025 17:00:00 GMT</pubDate>
+      <description>Board authorizes new buyback authorization.</description>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,3 @@
+source	feed_type	url	sector_filter
+businesswire	rss	https://www.businesswire.com/portal/site/home/news/	
+prnewswire	rss	https://www.prnewswire.com/rss/news-releases-list.rss

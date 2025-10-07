@@ -1,0 +1,14 @@
+# build context hygiene
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+.state/
+queue/
+tests/__pycache__/
+*.log
+.git
+.gitignore
+.ref/
+ref/watchlist.txt

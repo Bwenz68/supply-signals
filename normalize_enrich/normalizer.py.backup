@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict
+
 from .cik_ticker_map import load_map
 
 IN_DIR  = Path(os.getenv("RAW_QUEUE_DIR", "queue/raw_events"))
@@ -35,6 +36,7 @@ def normalize_one(d: Dict[str, Any], refmap):
     meta = d.get("meta") or {}
     
     # New format detection
+    # New format detection
     is_new_format = src in ("pr_feed", "sec_edgar", "press_release")
     
     if is_new_format:
@@ -42,8 +44,6 @@ def normalize_one(d: Dict[str, Any], refmap):
         issuer_name = d.get("issuer_name")
         cik = d.get("cik")
         ticker = None
-        sector = None
-        industry = None
         event_kind = d.get("event_kind") or src
         event_subtype = d.get("form_type")
         ts = d.get("event_datetime")
@@ -51,27 +51,21 @@ def normalize_one(d: Dict[str, Any], refmap):
         title = d.get("title")
         body = d.get("summary")
         
-        # Normalize CIK if present and enrich from universe
+        # Normalize CIK if present
         if cik:
             cik = cik.lstrip("0") or None
             if cik and cik in refmap:
-                ticker = ticker or refmap[cik].get("ticker")
-                issuer_name = issuer_name or refmap[cik].get("company")
-                sector = refmap[cik].get("sector")
-                industry = refmap[cik].get("industry")
+                ticker = ticker or refmap[cik]["ticker"]
+                issuer_name = issuer_name or refmap[cik]["company"]
     else:
         # Old format from press_release_ingestor.py / sec_edgar_ingestor.py
         cik = (meta.get("cik") or "").lstrip("0") or None
         ticker = meta.get("ticker")
         issuer_name = meta.get("company_name")
-        sector = None
-        industry = None
         
         if cik and (cik in refmap):
-            ticker = ticker or refmap[cik].get("ticker")
-            issuer_name = issuer_name or refmap[cik].get("company")
-            sector = refmap[cik].get("sector")
-            industry = refmap[cik].get("industry")
+            ticker = ticker or refmap[cik]["ticker"]
+            issuer_name = issuer_name or refmap[cik]["company"]
         
         event_kind = "SEC" if src == "SEC" else ("PR" if src == "PR" else "OTHER")
         event_subtype = meta.get("doc_type")
@@ -101,12 +95,6 @@ def normalize_one(d: Dict[str, Any], refmap):
         norm["cik"] = cik
         norm["canonical_cik"] = cik
     
-    # M7: Add sector/industry from universe
-    if sector:
-        norm["sector"] = sector
-    if industry:
-        norm["industry"] = industry
-    
     # Timestamp hardening
     if ts:
         dt = to_iso_utc(ts)
@@ -129,13 +117,13 @@ def main():
     ap = argparse.ArgumentParser(description="Normalize raw events to Phase-0-compatible records with optional enrichments.")
     ap.add_argument("--once", action="store_true", help="Process all NDJSON in IN_DIR once and exit.")
     args = ap.parse_args()
-    
+
     refmap = load_map()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     in_files = sorted(IN_DIR.glob("*.jsonl"))
     total_out = 0
-    
+
     for fp in in_files:
         out_fp = OUT_DIR / fp.name.replace(".jsonl", ".norm.jsonl")
         count = 0
@@ -147,7 +135,7 @@ def main():
                 count += 1
                 total_out += 1
         print(f"[NORMALIZE] {fp.name} -> {out_fp.name} ({count} items)")
-    
+
     print(f"[NORMALIZE] wrote {total_out} normalized items")
 
 if __name__ == "__main__":

@@ -1,0 +1,26 @@
+# Watchlist configuration - extended selectors for M7
+watchlist:
+  # By sector
+  - type: sector
+    value: Technology
+  
+  # By specific ticker
+  - type: ticker
+    value: AAPL
+  
+  - type: ticker
+    value: CAG
+  
+  # By CIK
+  - type: cik
+    value: "0000320193"
+  
+  # By tag (for future use)
+  - type: tag
+    value: high_priority
+
+# Company name mappings for normalization
+company_mappings:
+  "Apple Inc.": "AAPL"
+  "Microsoft Corporation": "MSFT"
+  "Conagra Brands": "CAG"

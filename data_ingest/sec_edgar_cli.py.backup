@@ -1,3 +1,4 @@
+# data_ingest/sec_edgar_cli.py
 """
 SEC EDGAR Atom ingest (lightweight).
 
@@ -18,7 +19,7 @@ import os
 import re
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse, urljoin
@@ -45,19 +46,11 @@ def _csvish_list(s: Optional[str]) -> List[str]:
     return [t.strip() for t in s.replace(";", ",").split(",") if t.strip()]
 
 def _parse_iso(s: str) -> Optional[datetime]:
-    """Parse ISO date/time string and return timezone-aware datetime (UTC)."""
     try:
         if len(s) == 10:
-            # Date only: make it timezone-aware UTC at midnight
-            dt = datetime.fromisoformat(s)
-            return dt.replace(tzinfo=timezone.utc)
-        # Handle "Z" suffix for UTC
-        s2 = s.replace("Z", "+00:00")
-        dt = datetime.fromisoformat(s2)
-        # Ensure timezone-aware
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
+            return datetime.fromisoformat(s)
+        s2 = s[:-1] if s.endswith("Z") else s
+        return datetime.fromisoformat(s2)
     except Exception:
         return None
 

@@ -1,24 +1,11 @@
 # data_ingest/pr_feeds_cli.py
 """
-Multi-source PR RSS/Atom ingest using feedparser.
+Press Release multi-feed ingester.
 
-- Accepts multiple feeds via --urls or --feeds-file (TSV or JSONL lines).
-- Optional per-feed issuer_name and tag overrides.
-- Writes raw PR events to queue/raw_events/pr_multi_*.jsonl (Phase-0 compatible).
-- Includes simple retry/backoff and optional rate-limit between feeds.
-
-Examples (offline fixtures):
-  python -m data_ingest.pr_feeds_cli \
-    --urls "file://$PWD/tests/fixtures/pr_sample.xml;file://$PWD/tests/fixtures/pr_sample_b.xml" \
-    --issuer-name "Contoso Energy" \
-    --tag demo
-
-Using a feeds file (TSV: url [TAB] issuer_name [TAB] tag):
-  python -m data_ingest.pr_feeds_cli --feeds-file ref/feeds.tsv
-  # or JSONL lines: {"url": "...", "issuer_name": "...", "tag": "..."}
-
-Notes:
-- This CLI is additive; pr_feed_cli (single source) remains available.
+- Accepts --urls "u1;u2;..." or --feeds-file (one URL per line; comments/# allowed).
+- Per-run cache (HTTP only): ETag/Last-Modified (shared across feeds).
+- Retry/backoff and optional rate limiting across HTTP fetches.
+- Writes combined rows to queue/raw_events/pr_multi_*.jsonl unless --out provided.
 """
 
 from __future__ import annotations
@@ -28,9 +15,9 @@ import json
 import os
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import urlparse
 
 try:
     import feedparser  # type: ignore
@@ -38,84 +25,39 @@ except Exception:
     print("ERROR: feedparser is required. Install with: pip install feedparser", file=sys.stderr)
     raise
 
+from shared.http_cache import (
+    is_http,
+    load_cache,
+    save_cache,
+    compose_conditional_headers,
+    extract_http_metadata,
+    update_cache_from_parsed,
+)
 
 RAW_QUEUE_DIR = os.getenv("RAW_QUEUE_DIR", "queue/raw_events")
+DEFAULT_CACHE_FILE = os.getenv("PR_CACHE_FILE", ".state/pr_cache.json")
 
+def _normalize_file_url(u: Optional[str]) -> Optional[str]:
+    if not u:
+        return u
+    p = urlparse(u)
+    if p.scheme.lower() != "file":
+        return u
+    if p.netloc:
+        path = p.path
+        if not path.startswith("/"):
+            path = "/" + path
+        return f"file:///{p.netloc}{path}"
+    if not u.startswith("file:///"):
+        return "file:///" + u[len("file://"):]
+    return u
 
-# ------------------------ Models ------------------------
-
-@dataclass
-class FeedSpec:
-    url: str
-    issuer_name: Optional[str] = None
-    tag: Optional[str] = None
-
-
-# ------------------------ Utilities ------------------------
-
-def _split_list(s: Optional[str]) -> List[str]:
-    if not s:
-        return []
-    # allow comma/semicolon separated
-    parts = []
-    for chunk in s.split(";"):
-        for sub in chunk.split(","):
-            t = sub.strip()
-            if t:
-                parts.append(t)
-    return parts
-
-def _load_feeds_file(path: str) -> List[FeedSpec]:
-    """
-    Supports:
-    - TSV: url [TAB] issuer_name [TAB] tag  (issuer_name/tag optional)
-    - JSONL: {"url": "...", "issuer_name": "...", "tag": "..."}
-    - Plain text: url per line
-    Lines starting with '#' are comments.
-    """
-    specs: List[FeedSpec] = []
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(f"feeds file not found: {path}")
-    with p.open("r", encoding="utf-8") as f:
-        for ln, line in enumerate(f, 1):
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("{"):
-                try:
-                    obj = json.loads(line)
-                    url = obj.get("url")
-                    if not url:
-                        continue
-                    specs.append(FeedSpec(url=str(url).strip(),
-                                          issuer_name=obj.get("issuer_name"),
-                                          tag=obj.get("tag")))
-                except Exception as e:
-                    print(f"[pr_feeds] WARN {path}:{ln} invalid JSONL: {e}")
-                continue
-            # Try TSV first
-            parts = line.split("\t")
-            if len(parts) >= 1:
-                url = parts[0].strip()
-                if not url:
-                    continue
-                issuer = parts[1].strip() if len(parts) >= 2 and parts[1].strip() else None
-                tag = parts[2].strip() if len(parts) >= 3 and parts[2].strip() else None
-                specs.append(FeedSpec(url=url, issuer_name=issuer, tag=tag))
-            else:
-                # Fallback plain URL
-                specs.append(FeedSpec(url=line))
-    return specs
-
-
-def _pick_datetime_iso(entry: Any) -> Optional[str]:
-    # Prefer published/updated string; fallback to parsed tuples
-    for key in ("published", "updated"):
+def _pick_iso(entry: Any) -> Optional[str]:
+    for key in ("updated", "published"):
         v = entry.get(key)
         if v:
             return str(v)
-    for key in ("published_parsed", "updated_parsed"):
+    for key in ("updated_parsed", "published_parsed"):
         t = entry.get(key)
         if t:
             try:
@@ -124,146 +66,162 @@ def _pick_datetime_iso(entry: Any) -> Optional[str]:
                 pass
     return None
 
+def _first_link(entry: Any) -> str:
+    if entry.get("link"):
+        return str(entry["link"])
+    links = entry.get("links") or []
+    for l in links:
+        href = l.get("href")
+        if href:
+            return str(href)
+    return ""
 
-def _entry_to_raw(entry: Any, feed_title: str, issuer_name_opt: Optional[str], tag_opt: Optional[str]) -> Dict[str, Any]:
+def _entry_to_raw(entry: Any, issuer_name: Optional[str], tag: Optional[str]) -> Dict[str, Any]:
     title = entry.get("title") or "(no title)"
-    link = entry.get("link") or entry.get("id") or ""
-    summary = entry.get("summary") or entry.get("description") or ""
-    dt = _pick_datetime_iso(entry)
-
+    link = _first_link(entry)
+    dt = _pick_iso(entry)
+    summary = entry.get("summary") or entry.get("summary_detail", {}).get("value") or ""
     raw = {
-        "source": "pr_feed",
+        "source": "press_release",
         "event_kind": "press_release",
         "title": title,
         "first_url": link,
         "event_datetime": dt,
         "summary": summary,
-        "feed_title": feed_title,
     }
-    if issuer_name_opt:
-        raw["issuer_name"] = issuer_name_opt
-    if tag_opt:
-        raw["source_tag"] = tag_opt
+    if issuer_name:
+        raw["issuer_name"] = issuer_name
+    if tag:
+        raw["tag"] = tag
     return raw
 
-
-def _parse_one(url: str, *, request_headers: Dict[str, str], retries: int, backoff_base: float) -> Any:
-    attempts = max(0, retries) + 1
-    for i in range(1, attempts + 1):
-        parsed = feedparser.parse(url, request_headers=request_headers)
-        status = getattr(parsed, "status", None)
-        bozo = bool(getattr(parsed, "bozo", False))
-        # Accept if no bozo and not a 5xx
-        if (status is None or (200 <= int(status) < 500)) and not bozo:
-            return parsed
-        # Retry on bozo or 5xx
-        if i < attempts:
-            sleep_s = backoff_base * (2 ** (i - 1))
-            time.sleep(sleep_s)
-            continue
-        return parsed
-
-
-# ------------------------ CLI ------------------------
-
 def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        prog="python -m data_ingest.pr_feeds_cli",
-        description="Parse multiple PR RSS/Atom feeds and write raw events to queue/raw_events/*.jsonl",
-    )
-    p.add_argument("--urls", help="Comma/semicolon separated list of feed URLs (supports file://)")
-    p.add_argument("--feeds-file", help="Path to feeds list (TSV/JSONL/plain lines). Each line: url [TAB] issuer [TAB] tag")
-    p.add_argument("--issuer-name", help="Global issuer_name fallback (used when a feed does not specify one)")
-    p.add_argument("--tag", help="Global source_tag fallback (used when a feed does not specify one)")
-    p.add_argument("--limit-per-feed", type=int, default=50, help="Max entries to emit per feed (default 50)")
-    p.add_argument("--user-agent", default=os.getenv("PR_USER_AGENT"), help="Optional User-Agent for HTTP PR feeds (env PR_USER_AGENT)")
-    p.add_argument("--retries", type=int, default=2, help="Retries per feed on transient errors (default 2)")
-    p.add_argument("--retry-backoff", type=float, default=0.5, help="Backoff base seconds (default 0.5)")
-    p.add_argument("--rate-per-sec", type=float, default=0.0, help="Throttle between feeds (posts per second). 0=disabled")
-    p.add_argument("--out", help="Explicit output path; otherwise auto-named under queue/raw_events")
+    p = argparse.ArgumentParser(prog="python -m data_ingest.pr_feeds_cli",
+                                description="Parse multiple PR RSS/Atom feeds and write raw rows.")
+    p.add_argument("--urls", help="Semicolon-separated list of URLs")
+    p.add_argument("--feeds-file", help="File containing one URL per line (comments with #)")
+    p.add_argument("--issuer-name", help="Optional issuer name hint for all rows")
+    p.add_argument("--tag", help="Optional tag label to attach to all rows")
+    p.add_argument("--max", type=int, default=200, help="Max entries to emit across all feeds (default 200)")
+    p.add_argument("--out", help="Explicit output path; otherwise auto-named in queue/raw_events/pr_multi_*.jsonl")
+    # Cache / HTTP controls
+    p.add_argument("--cache-file", default=DEFAULT_CACHE_FILE, help=f"ETag/Last-Modified cache (default {DEFAULT_CACHE_FILE})")
+    p.add_argument("--no-cache", action="store_true", help="Disable HTTP conditional requests & cache updates.")
+    p.add_argument("--debug-headers", action="store_true", help="Print request/response metadata (HTTP only).")
+    p.add_argument("--rate-per-min", type=float, default=float(os.getenv("PR_RATE_PER_MIN", "60")), help="Max HTTP fetches per minute (default 60).")
+    p.add_argument("--retries", type=int, default=2, help="Retries on HTTP parse errors per feed (default 2)")
+    p.add_argument("--backoff", type=float, default=1.7, help="Exponential backoff multiplier (default 1.7)")
     return p.parse_args(argv)
 
-
-def _gather_specs(args: argparse.Namespace) -> List[FeedSpec]:
-    specs: List[FeedSpec] = []
+def _iter_urls(args: argparse.Namespace) -> Iterable[str]:
+    urls: List[str] = []
     if args.urls:
-        for u in _split_list(args.urls):
-            specs.append(FeedSpec(url=u))
+        urls.extend([u.strip() for u in args.urls.split(";") if u.strip()])
     if args.feeds_file:
-        specs.extend(_load_feeds_file(args.feeds_file))
-    if not specs:
+        for line in Path(args.feeds_file).read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            urls.append(line)
+    if not urls:
         raise SystemExit("ERROR: Provide --urls or --feeds-file")
-    # Apply global fallbacks where missing
-    for s in specs:
-        if not s.issuer_name and args.issuer_name:
-            s.issuer_name = args.issuer_name
-        if not s.tag and args.tag:
-            s.tag = args.tag
-    return specs
-
+    return urls
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv)
-    specs = _gather_specs(args)
-
-    # Prepare headers and rate limiter
-    headers: Dict[str, str] = {}
-    if args.user_agent:
-        headers["User-Agent"] = args.user_agent
-
-    min_interval = 1.0 / args.rate_per_sec if args.rate_per_sec and args.rate_per_sec > 0 else 0.0
-    next_time = 0.0
+    cache: Dict[str, Dict[str, str]] = {}
+    if not args.no_cache:
+        cache = load_cache(args.cache_file)
 
     rows: List[Dict[str, Any]] = []
-    per_feed_counts: List[Tuple[str, int]] = []
 
-    for s in specs:
-        # Throttle between feeds if requested
-        if min_interval > 0:
-            now = time.monotonic()
-            if now < next_time:
-                time.sleep(next_time - now)
-            next_time = max(now, next_time) + min_interval
+    min_interval = (60.0 / args.rate_per_min) if (args.rate_per_min and args.rate_per_min > 0) else 0.0
+    last_req_time = 0.0
 
-        parsed = _parse_one(s.url, request_headers=headers, retries=args.retries, backoff_base=args.retry_backoff)
+    for raw_u in _iter_urls(args):
+        url = _normalize_file_url(raw_u)
 
-        if getattr(parsed, "bozo", False):
-            print(f"[pr_feeds] WARN: parse issue on {s.url}: {getattr(parsed, 'bozo_exception', '')}")
+        attempt = 0
+        delay = 0.5
+        while True:
+            if is_http(url) and min_interval > 0 and last_req_time > 0:
+                remaining = (last_req_time + min_interval) - time.monotonic()
+                if remaining > 0:
+                    time.sleep(remaining)
 
-        feed_title = ""
-        if hasattr(parsed, "feed"):
-            feed_title = parsed.feed.get("title", "") or ""
+            request_headers: Dict[str, str] = {}
+            if is_http(url) and not args.no_cache:
+                cond = compose_conditional_headers(url, cache)
+                request_headers.update(cond)
+                if args.debug_headers and cond:
+                    print(f"[pr_feeds] Request conditional headers ({url}): {cond}")
 
-        entries = (parsed.entries or [])[: args.limit_per_feed]
-        cnt = 0
-        for e in entries:
-            rows.append(_entry_to_raw(e, feed_title, s.issuer_name, s.tag))
-            cnt += 1
-        per_feed_counts.append((s.url, cnt))
+            parsed = feedparser.parse(url, request_headers=request_headers)
+
+            if args.debug_headers and is_http(url):
+                meta = extract_http_metadata(parsed)
+                print(f"[pr_feeds] Response meta ({url}): {meta}")
+
+            if not getattr(parsed, "bozo", 0):
+                break
+
+            if not is_http(url):
+                print(f"[pr_feeds] ERROR parsing file feed: {parsed.bozo_exception}", file=sys.stderr)
+                parsed = None
+                break
+
+            attempt += 1
+            if attempt > max(0, args.retries):
+                print(f"[pr_feeds] ERROR after retries: {parsed.bozo_exception}", file=sys.stderr)
+                parsed = None
+                break
+            time.sleep(delay)
+            delay *= max(1.0, args.backoff)
+
+        last_req_time = time.monotonic()
+
+        if not parsed:
+            continue
+
+        for e in (parsed.entries or []):
+            if len(rows) >= args.max:
+                break
+            rows.append(_entry_to_raw(e, args.issuer_name, args.tag))
+
+        if is_http(url) and not args.no_cache:
+            try:
+                update_cache_from_parsed(url, parsed, cache, now_ts=time.strftime("%Y-%m-%dT%H%M%SZ"))
+            except Exception:
+                pass
+
+        # If we hit max, we can stop parsing further feeds
+        if len(rows) >= args.max:
+            break
+
+    if not args.no_cache:
+        try:
+            save_cache(args.cache_file, cache)
+        except Exception:
+            pass
 
     if not rows:
-        print("[pr_feeds] No entries across all feeds (nothing written).")
+        print("[pr_feeds] No entries parsed (nothing written).")
         return 0
 
-    # Output file
     if args.out:
         out_path = Path(args.out)
     else:
         ts = time.strftime("%Y%m%d-%H%M%S")
-        out_path = Path(RAW_QUEUE_DIR) / f"pr_multi_{ts}.jsonl"
+        suffix = (args.tag or args.issuer_name or "multi").replace(" ", "_")
+        out_path = Path(RAW_QUEUE_DIR) / f"pr_multi_{suffix}_{ts}.jsonl"
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
-    # Summary
     print(f"[pr_feeds] Wrote {len(rows)} raw row(s) to {out_path}")
-    for url, n in per_feed_counts:
-        print(f"[pr_feeds]  - {url}: {n} row(s)")
-
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
