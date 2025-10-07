@@ -3,10 +3,9 @@ from __future__ import annotations
 import os
 import re
 import logging
-import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Tuple, Set, Dict, Any, List
+from typing import Optional, Tuple, Set, Dict, Any
 
 _LOG = logging.getLogger(__name__)
 
@@ -71,12 +70,9 @@ def _extract_identifiers(event: Dict[str, Any]) -> Tuple[Optional[str], Optional
 class Watchlist:
     tickers: Set[str] = field(default_factory=set)  # canonical uppercase
     ciks: Set[str] = field(default_factory=set)     # 10-digit strings
-    sectors: Set[str] = field(default_factory=set)  # M7: sector filter
-    tags: Set[str] = field(default_factory=set)     # M7: tag filter
 
     @classmethod
     def from_file(cls, path: Path) -> "Watchlist":
-        """Legacy text file format (one ticker/CIK per line)"""
         tickers: Set[str] = set()
         ciks: Set[str] = set()
         invalid: Set[str] = set()
@@ -110,76 +106,12 @@ class Watchlist:
         _LOG.info("Watchlist loaded: %d tickers, %d CIKs", len(tickers), len(ciks))
         return wl
 
-    @classmethod
-    def from_yaml(cls, path: Path) -> "Watchlist":
-        """M7: Load from YAML config with extended selectors"""
-        with path.open("r", encoding="utf-8") as f:
-            config = yaml.safe_load(f) or {}
-        
-        watchlist_items = config.get("watchlist", [])
-        if not isinstance(watchlist_items, list):
-            _LOG.warning("Watchlist YAML: 'watchlist' is not a list, treating as empty")
-            watchlist_items = []
-        
-        tickers: Set[str] = set()
-        ciks: Set[str] = set()
-        sectors: Set[str] = set()
-        tags: Set[str] = set()
-        
-        for item in watchlist_items:
-            if not isinstance(item, dict):
-                continue
-            
-            sel_type = item.get("type", "").lower()
-            value = item.get("value")
-            
-            if not value:
-                continue
-            
-            if sel_type == "ticker":
-                t = _canon_ticker(str(value))
-                if t:
-                    tickers.add(t)
-            elif sel_type == "cik":
-                c = _canon_cik(str(value))
-                if c:
-                    ciks.add(c)
-            elif sel_type == "sector":
-                sectors.add(str(value).strip())
-            elif sel_type == "tag":
-                tags.add(str(value).strip())
-        
-        _LOG.info("Watchlist loaded: %d tickers, %d CIKs, %d sectors, %d tags",
-                  len(tickers), len(ciks), len(sectors), len(tags))
-        return cls(tickers=tickers, ciks=ciks, sectors=sectors, tags=tags)
-
     def allowed(self, event: Dict[str, Any]) -> bool:
-        """Check if event matches any watchlist selector"""
-        # If no selectors defined, allow all
-        if not (self.tickers or self.ciks or self.sectors or self.tags):
-            return True
-        
-        # Check ticker/CIK (legacy)
         t, c = _extract_identifiers(event)
         if t and t in self.tickers:
             return True
         if c and c in self.ciks:
             return True
-        
-        # M7: Check sector
-        if self.sectors:
-            event_sector = event.get("sector")
-            if event_sector and str(event_sector).strip() in self.sectors:
-                return True
-        
-        # M7: Check tags (for future use)
-        if self.tags:
-            event_tags = event.get("tags", [])
-            if isinstance(event_tags, list):
-                for tag in event_tags:
-                    if str(tag).strip() in self.tags:
-                        return True
-        
         return False
 
 
@@ -187,13 +119,7 @@ def load_watchlist(path: str) -> Watchlist:
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"Watchlist file not found: {p}")
-    
-    # Detect format by extension
-    if p.suffix.lower() in ('.yaml', '.yml'):
-        return Watchlist.from_yaml(p)
-    else:
-        # Legacy text format
-        return Watchlist.from_file(p)
+    return Watchlist.from_file(p)
 
 
 def infer_watchlist(cli_path: Optional[str]) -> Optional[Watchlist]:
@@ -202,8 +128,7 @@ def infer_watchlist(cli_path: Optional[str]) -> Optional[Watchlist]:
       - if WATCHLIST_DISABLE=1 => disabled (return None)
       - else if cli_path is provided => use it (may be None if flag present without value)
       - else if WATCHLIST_FILE env is set => use it
-      - else if 'configs/normalize_enrich.yaml' exists => use it (M7)
-      - else if 'ref/watchlist.txt' exists => use it (legacy)
+      - else if 'ref/watchlist.txt' exists => use it
       - else => disabled
     Failure policy:
       - If resolved path does not exist => raise FileNotFoundError
@@ -214,29 +139,17 @@ def infer_watchlist(cli_path: Optional[str]) -> Optional[Watchlist]:
     path = None
     if cli_path is not None:
         path = cli_path if cli_path else os.environ.get("WATCHLIST_FILE")
-        # If user wrote just "--watchlist" with no path and no env, try defaults
+        # If user wrote just "--watchlist" with no path and no env, try default
         if not path:
-            # M7: Try YAML config first
-            yaml_config = Path("configs/normalize_enrich.yaml")
-            if yaml_config.exists():
-                path = str(yaml_config)
-            else:
-                # Fall back to legacy
-                default = Path("ref/watchlist.txt")
-                if default.exists():
-                    path = str(default)
+            default = Path("ref/watchlist.txt")
+            if default.exists():
+                path = str(default)
     else:
         path = os.environ.get("WATCHLIST_FILE")
         if not path:
-            # M7: Try YAML config first
-            yaml_config = Path("configs/normalize_enrich.yaml")
-            if yaml_config.exists():
-                path = str(yaml_config)
-            else:
-                # Fall back to legacy
-                default = Path("ref/watchlist.txt")
-                if default.exists():
-                    path = str(default)
+            default = Path("ref/watchlist.txt")
+            if default.exists():
+                path = str(default)
 
     if not path:
         return None  # not enabled

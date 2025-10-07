@@ -18,6 +18,7 @@ def main():
     ap.add_argument(
         "--watchlist",
         nargs="?",
+        const="",
         metavar="PATH",
         help="Enable watchlist filter (optional PATH). If omitted, uses WATCHLIST_FILE env or ref/watchlist.txt."
     )
@@ -28,7 +29,7 @@ def main():
     try:
         WATCHLIST = infer_watchlist(getattr(args, "watchlist", None))
         if WATCHLIST:
-            print(f"[WATCHLIST] enabled (tickers={len(WATCHLIST.tickers)}, ciks={len(WATCHLIST.ciks)})")
+            print(f"[WATCHLIST] enabled (tickers={len(WATCHLIST.tickers)}, ciks={len(WATCHLIST.ciks)}, sectors={len(WATCHLIST.sectors)})")
         else:
             print("[WATCHLIST] disabled")
     except FileNotFoundError as e:

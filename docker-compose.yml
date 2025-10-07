@@ -104,7 +104,7 @@ services:
       - DEDUPE_TTL_DAYS=${DEDUPE_TTL_DAYS:-7}
       - DEDUPE_DISABLE=${DEDUPE_DISABLE:-0}
       - SIGNAL_THRESHOLD=${SIGNAL_THRESHOLD:-3}
-    command: bash -c "python -m signal_detect --threshold $$SIGNAL_THRESHOLD $${WATCHLIST_FILE:+--watchlist \"$$WATCHLIST_FILE\"}"
+    command: bash -c "pip install -q pyyaml && python -m signal_detect --threshold $$SIGNAL_THRESHOLD --watchlist"
     profiles:
       - pipeline
 
