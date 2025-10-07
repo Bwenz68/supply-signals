@@ -2,3 +2,7 @@ ticker	cik	name	sector	industry
 AAPL	0000320193	Apple Inc.	Technology	Consumer Electronics
 MSFT	0000789019	Microsoft Corporation	Technology	Software
 CAG	0001324948	Conagra Brands	Consumer Staples	Packaged Foods
+GME	0001326380	GameStop Corp	Consumer Discretionary	Specialty Retail
+RDDT	0001713445	Reddit Inc	Communication Services	Interactive Media
+PLTR	0001321655	Palantir Technologies	Technology	Software
+COIN	0001679788	Coinbase Global	Financials	Financial Services
