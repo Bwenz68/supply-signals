@@ -152,6 +152,26 @@ services:
       - pipeline
       - insider
 
+  # --------------------------------------------------------------------------
+  # Signal Fusion
+  # --------------------------------------------------------------------------
+  signal_fusion:
+    image: python:3.10-slim
+    working_dir: /app
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./:/app:rw
+    environment:
+      - HOME=/tmp
+      - SIG_QUEUE_DIR=${SIG_QUEUE_DIR:-queue/signals}
+      - FUSED_QUEUE_DIR=${FUSED_QUEUE_DIR:-queue/fused_signals}
+      - FUSION_WINDOW_HOURS=${FUSION_WINDOW_HOURS:-48}
+    command: bash -c "python -m signal_detect.signal_fusion --window-hours $$FUSION_WINDOW_HOURS"
+    profiles:
+      - pipeline
+      - fusion
+
+
 
   # --------------------------------------------------------------------------
   # Alert Engine: Console
