@@ -171,6 +171,24 @@ services:
       - pipeline
       - fusion
 
+  # --------------------------------------------------------------------------
+  # Correlation Engine
+  # --------------------------------------------------------------------------
+  correlation_engine:
+    image: python:3.10-slim
+    working_dir: /app
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./:/app:rw
+    environment:
+      - HOME=/tmp
+      - SIG_QUEUE_DIR=${SIG_QUEUE_DIR:-queue/signals}
+      - CORRELATION_DAYS=${CORRELATION_DAYS:-60}
+      - CORRELATION_THRESHOLD=${CORRELATION_THRESHOLD:-0.5}
+    command: bash -c "pip install -q yfinance pandas numpy && python -m signal_detect.correlation_engine --days $$CORRELATION_DAYS --correlation-threshold $$CORRELATION_THRESHOLD"
+    profiles:
+      - pipeline
+      - correlation
 
 
   # --------------------------------------------------------------------------
