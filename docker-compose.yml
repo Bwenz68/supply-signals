@@ -70,6 +70,29 @@ services:
       - sec
 
   # --------------------------------------------------------------------------
+  # Ingest: Reddit Sentiment
+  # --------------------------------------------------------------------------
+  ingest_reddit:
+    image: python:3.10-slim
+    working_dir: /app
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./:/app:rw
+    environment:
+      - HOME=/tmp
+      - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID:-}
+      - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET:-}
+      - REDDIT_USER_AGENT=${REDDIT_USER_AGENT:-supply-signals/1.0}
+      - RAW_QUEUE_DIR=${RAW_QUEUE_DIR:-queue/raw_events}
+      - REDDIT_SUBREDDITS=${REDDIT_SUBREDDITS:-wallstreetbets,stocks,investing}
+      - REDDIT_LIMIT=${REDDIT_LIMIT:-100}
+    command: bash -c "pip install -q praw && python -m data_ingest.reddit_sentiment_cli --subreddits \"$$REDDIT_SUBREDDITS\" --limit $$REDDIT_LIMIT"
+    profiles:
+      - ingest
+      - reddit
+
+
+  # --------------------------------------------------------------------------
   # Normalize & Enrich
   # --------------------------------------------------------------------------
   normalize_enrich:
