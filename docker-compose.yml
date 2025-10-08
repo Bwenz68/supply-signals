@@ -109,6 +109,28 @@ services:
       - pipeline
 
   # --------------------------------------------------------------------------
+  # Insider Clustering Detection
+  # --------------------------------------------------------------------------
+  insider_clustering:
+    image: python:3.10-slim
+    working_dir: /app
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./:/app:rw
+    environment:
+      - HOME=/tmp
+      - SEC_USER_AGENT=${SEC_USER_AGENT:-}
+      - RAW_QUEUE_DIR=${RAW_QUEUE_DIR:-queue/raw_events}
+      - SIG_QUEUE_DIR=${SIG_QUEUE_DIR:-queue/signals}
+      - INSIDER_WINDOW_DAYS=${INSIDER_WINDOW_DAYS:-30}
+      - INSIDER_MIN_INSIDERS=${INSIDER_MIN_INSIDERS:-3}
+    command: bash -c "pip install -q requests && python -m signal_detect.insider_clustering --window-days $$INSIDER_WINDOW_DAYS --min-insiders $$INSIDER_MIN_INSIDERS"
+    profiles:
+      - pipeline
+      - insider
+
+
+  # --------------------------------------------------------------------------
   # Alert Engine: Console
   # --------------------------------------------------------------------------
   alert_console:
